@@ -1,0 +1,958 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HWP 교수학습평가계획 JSON 변환기</title>
+  <script src="https://cdn.jsdelivr.net/npm/cfb@1.2.2/dist/cfb.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --panel: #fff;
+      --line: #d7deea;
+      --text: #182231;
+      --muted: #687386;
+      --accent: #1f7469;
+      --accent-2: #15564e;
+      --warn: #946112;
+      --soft: #eef7f5;
+      --code: #101723;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 24px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .sub,
+    .file-name,
+    .status,
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .sub {
+      margin: 0;
+    }
+
+    .file-name {
+      word-break: break-all;
+      text-align: right;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(292px, 380px) minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 10px 24px rgba(24, 34, 49, 0.06);
+    }
+
+    .controls {
+      padding: 18px;
+    }
+
+    .dropzone {
+      display: grid;
+      place-items: center;
+      min-height: 184px;
+      padding: 22px;
+      border: 1px dashed #99a7ba;
+      border-radius: 8px;
+      background: #fbfcff;
+      text-align: center;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+
+    .dropzone.dragging {
+      background: var(--soft);
+      border-color: var(--accent);
+    }
+
+    .dropzone strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 16px;
+    }
+
+    .dropzone span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    input[type="file"] {
+      width: 100%;
+      margin-top: 14px;
+    }
+
+    .checks {
+      display: grid;
+      gap: 10px;
+      margin: 18px 0;
+      font-size: 14px;
+    }
+
+    .check {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 8px;
+      align-items: start;
+    }
+
+    .check small {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    button {
+      min-height: 40px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      padding: 0 14px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 750;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: var(--accent-2);
+    }
+
+    button.secondary {
+      background: #fff;
+      border-color: var(--line);
+      color: var(--text);
+    }
+
+    button.secondary:hover {
+      background: #f2f5f9;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .status {
+      min-height: 58px;
+      margin-top: 14px;
+      padding: 12px;
+      border-radius: 7px;
+      background: #f4f7fb;
+      white-space: pre-wrap;
+    }
+
+    .status.warn {
+      color: var(--warn);
+      background: #fff7e9;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 10px;
+      border-radius: 7px;
+      background: #f7f9fc;
+    }
+
+    .metric b {
+      display: block;
+      font-size: 20px;
+      line-height: 1.1;
+    }
+
+    .preview {
+      padding: 14px;
+    }
+
+    .preview-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 560px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: var(--code);
+      color: #edf3ff;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0;
+      tab-size: 2;
+    }
+
+    @media (max-width: 860px) {
+      header,
+      .layout {
+        display: block;
+      }
+
+      .file-name {
+        text-align: left;
+        margin-top: 8px;
+      }
+
+      .controls {
+        margin-bottom: 14px;
+      }
+
+      .summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      textarea {
+        min-height: 420px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>HWP 교수학습평가계획 JSON 변환기</h1>
+        <p class="sub">HWP 파일을 올리면 본문 레코드를 직접 읽어서 보관용 JSON으로 저장합니다.</p>
+      </div>
+      <div class="file-name" id="fileName">파일 대기 중</div>
+    </header>
+
+    <div class="layout">
+      <section class="panel controls">
+        <div class="dropzone" id="dropzone">
+          <div>
+            <strong>HWP 파일 놓기</strong>
+            <span>교수학습평가계획 .hwp 파일을 선택하거나 끌어오세요.</span>
+          </div>
+        </div>
+
+        <input id="fileInput" type="file" accept=".hwp,application/x-hwp">
+
+        <div class="checks">
+          <label class="check">
+            <input id="includePayloadHex" type="checkbox" checked>
+            <div>
+              원본 문단 payload hex 보관
+              <small>문단별 HWP 텍스트 레코드를 검증용으로 함께 저장합니다.</small>
+            </div>
+          </label>
+
+          <label class="check">
+            <input id="includeBinaryHashes" type="checkbox" checked>
+            <div>
+              섹션 해시 보관
+              <small>압축 해제된 BodyText 섹션의 SHA-256을 저장합니다.</small>
+            </div>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="downloadBtn" disabled>JSON 저장</button>
+          <button class="secondary" id="copyBtn" disabled>복사</button>
+        </div>
+
+        <div class="status" id="status">HWP 파일을 올리면 변환 결과가 오른쪽에 표시됩니다.</div>
+      </section>
+
+      <section class="panel">
+        <div class="summary">
+          <div class="metric"><b id="lineCount">0</b><span>본문 줄</span></div>
+          <div class="metric"><b id="paragraphCount">0</b><span>문단</span></div>
+          <div class="metric"><b id="textRecordCount">0</b><span>텍스트 레코드</span></div>
+          <div class="metric"><b id="charCount">0</b><span>문자</span></div>
+        </div>
+        <div class="preview">
+          <div class="preview-head">
+            <h2>JSON 미리보기</h2>
+            <span class="file-name" id="jsonSize">0 KB</span>
+          </div>
+          <textarea id="output" spellcheck="false" readonly></textarea>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const fileInput = document.getElementById("fileInput");
+    const dropzone = document.getElementById("dropzone");
+    const includePayloadHex = document.getElementById("includePayloadHex");
+    const includeBinaryHashes = document.getElementById("includeBinaryHashes");
+    const downloadBtn = document.getElementById("downloadBtn");
+    const copyBtn = document.getElementById("copyBtn");
+    const output = document.getElementById("output");
+    const statusBox = document.getElementById("status");
+    const fileName = document.getElementById("fileName");
+    const lineCount = document.getElementById("lineCount");
+    const paragraphCount = document.getElementById("paragraphCount");
+    const textRecordCount = document.getElementById("textRecordCount");
+    const charCount = document.getElementById("charCount");
+    const jsonSize = document.getElementById("jsonSize");
+
+    let currentFile = null;
+    let currentJsonText = "";
+    let currentOutputName = "converted_hwp.json";
+
+    const tagNames = {
+      16: "HWPTAG_DOCUMENT_PROPERTIES",
+      17: "HWPTAG_ID_MAPPINGS",
+      18: "HWPTAG_BIN_DATA",
+      19: "HWPTAG_FACE_NAME",
+      20: "HWPTAG_BORDER_FILL",
+      21: "HWPTAG_CHAR_SHAPE",
+      22: "HWPTAG_TAB_DEF",
+      23: "HWPTAG_NUMBERING",
+      24: "HWPTAG_BULLET",
+      25: "HWPTAG_PARA_SHAPE",
+      26: "HWPTAG_STYLE",
+      27: "HWPTAG_DOC_DATA",
+      28: "HWPTAG_DISTRIBUTE_DOC_DATA",
+      30: "HWPTAG_COMPATIBLE_DOCUMENT",
+      31: "HWPTAG_LAYOUT_COMPATIBILITY",
+      32: "HWPTAG_TRACKCHANGE",
+      33: "HWPTAG_MEMO_SHAPE",
+      66: "HWPTAG_PARA_HEADER",
+      67: "HWPTAG_PARA_TEXT",
+      68: "HWPTAG_PARA_CHAR_SHAPE",
+      69: "HWPTAG_PARA_LINE_SEG",
+      70: "HWPTAG_PARA_RANGE_TAG",
+      71: "HWPTAG_CTRL_HEADER",
+      72: "HWPTAG_LIST_HEADER",
+      73: "HWPTAG_PAGE_DEF",
+      74: "HWPTAG_FOOTNOTE_SHAPE",
+      75: "HWPTAG_PAGE_BORDER_FILL",
+      76: "HWPTAG_SHAPE_COMPONENT",
+      77: "HWPTAG_TABLE",
+      78: "HWPTAG_SHAPE_COMPONENT_LINE",
+      79: "HWPTAG_SHAPE_COMPONENT_RECTANGLE",
+      80: "HWPTAG_SHAPE_COMPONENT_ELLIPSE",
+      81: "HWPTAG_SHAPE_COMPONENT_ARC",
+      82: "HWPTAG_SHAPE_COMPONENT_POLYGON",
+      83: "HWPTAG_SHAPE_COMPONENT_CURVE",
+      84: "HWPTAG_SHAPE_COMPONENT_OLE",
+      85: "HWPTAG_SHAPE_COMPONENT_PICTURE",
+      86: "HWPTAG_SHAPE_COMPONENT_CONTAINER",
+      87: "HWPTAG_CTRL_DATA",
+      88: "HWPTAG_EQEDIT",
+      89: "HWPTAG_SHAPE_COMPONENT_TEXTART",
+      90: "HWPTAG_FORM_OBJECT"
+    };
+
+    const controlNames = {
+      0x00: "NULL",
+      0x01: "CTLCHR01",
+      0x02: "SECTION_COLUMN_DEF",
+      0x03: "FIELD_START",
+      0x04: "FIELD_END",
+      0x05: "CTLCHR05",
+      0x06: "CTLCHR06",
+      0x07: "CTLCHR07",
+      0x08: "TITLE_MARK",
+      0x09: "TAB",
+      0x0a: "LINE_BREAK",
+      0x0b: "DRAWING_TABLE_OBJECT",
+      0x0c: "CTLCHR0C",
+      0x0d: "PARAGRAPH_BREAK",
+      0x0e: "CTLCHR0E",
+      0x0f: "HIDDEN_EXPLANATION",
+      0x10: "HEADER_FOOTER",
+      0x11: "FOOT_END_NOTE",
+      0x12: "AUTO_NUMBER",
+      0x13: "CTLCHR13",
+      0x14: "CTLCHR14",
+      0x15: "PAGE_CTLCHR",
+      0x16: "BOOKMARK",
+      0x17: "CTLCHR17",
+      0x18: "HYPHEN",
+      0x1e: "NONBREAK_SPACE",
+      0x1f: "FIXWIDTH_SPACE"
+    };
+
+    const controlUnitSizes = {
+      0x00: 1,
+      0x01: 8,
+      0x02: 8,
+      0x03: 8,
+      0x04: 8,
+      0x05: 8,
+      0x06: 8,
+      0x07: 8,
+      0x08: 8,
+      0x09: 8,
+      0x0a: 1,
+      0x0b: 8,
+      0x0c: 8,
+      0x0d: 1,
+      0x0e: 8,
+      0x0f: 8,
+      0x10: 8,
+      0x11: 8,
+      0x12: 8,
+      0x13: 8,
+      0x14: 8,
+      0x15: 8,
+      0x16: 8,
+      0x17: 8,
+      0x18: 1,
+      0x1e: 1,
+      0x1f: 1
+    };
+
+    fileInput.addEventListener("change", () => {
+      if (fileInput.files && fileInput.files[0]) handleFile(fileInput.files[0]);
+    });
+
+    dropzone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      dropzone.classList.add("dragging");
+    });
+
+    dropzone.addEventListener("dragleave", () => {
+      dropzone.classList.remove("dragging");
+    });
+
+    dropzone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      dropzone.classList.remove("dragging");
+      if (event.dataTransfer.files && event.dataTransfer.files[0]) handleFile(event.dataTransfer.files[0]);
+    });
+
+    includePayloadHex.addEventListener("change", () => {
+      if (currentFile) handleFile(currentFile);
+    });
+
+    includeBinaryHashes.addEventListener("change", () => {
+      if (currentFile) handleFile(currentFile);
+    });
+
+    downloadBtn.addEventListener("click", () => {
+      if (!currentJsonText) return;
+      const blob = new Blob([currentJsonText], { type: "application/json;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = currentOutputName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    copyBtn.addEventListener("click", async () => {
+      if (!currentJsonText) return;
+      await navigator.clipboard.writeText(currentJsonText);
+      setStatus("JSON을 클립보드에 복사했습니다.");
+    });
+
+    async function handleFile(file) {
+      currentFile = file;
+      fileName.textContent = file.name;
+      currentOutputName = file.name.replace(/\.[^.]+$/, "") + ".json";
+      setStatus("HWP 파일을 읽는 중입니다.");
+
+      try {
+        ensureLibraries();
+        const buffer = await file.arrayBuffer();
+        const archive = await convertHwpToArchive(buffer, file);
+        currentJsonText = JSON.stringify(archive, null, 2) + "\n";
+        output.value = currentJsonText;
+        downloadBtn.disabled = false;
+        copyBtn.disabled = false;
+        updateMetrics(archive, currentJsonText);
+        setStatus("변환 완료\n" + currentOutputName + "로 저장할 수 있습니다.");
+      } catch (error) {
+        console.error(error);
+        currentJsonText = "";
+        output.value = "";
+        downloadBtn.disabled = true;
+        copyBtn.disabled = true;
+        updateEmptyMetrics();
+        setStatus("변환 실패: " + error.message, true);
+      }
+    }
+
+    function ensureLibraries() {
+      if (!window.CFB) throw new Error("CFB 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인하세요.");
+      if (!window.pako) throw new Error("pako 압축 해제 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인하세요.");
+    }
+
+    async function convertHwpToArchive(buffer, file) {
+      const sourceBytes = new Uint8Array(buffer);
+      const sourceHash = await sha256Hex(sourceBytes);
+      const cfb = CFB.read(sourceBytes, { type: "array" });
+      const fileHeader = findStreamBytes(cfb, "FileHeader");
+      if (!fileHeader) throw new Error("FileHeader 스트림을 찾을 수 없습니다. HWP 5.x 파일인지 확인하세요.");
+
+      const signature = decodeLatin1(fileHeader.slice(0, 32));
+      if (!signature.startsWith("HWP Document File")) {
+        throw new Error("HWP 5.x 문서 시그니처가 아닙니다.");
+      }
+
+      const version = Array.from(fileHeader.slice(32, 36));
+      const flags = readUint32(fileHeader, 36);
+      const sectionEntries = listSectionEntries(cfb);
+      if (!sectionEntries.length) throw new Error("BodyText/Section 스트림을 찾을 수 없습니다.");
+
+      const sections = [];
+      const allParagraphs = [];
+      const renderedParagraphs = [];
+      const recordCounts = {};
+      let paraTextRecordCount = 0;
+      let textChunkCount = 0;
+      let controlChunkCount = 0;
+      let textCharacterCount = 0;
+
+      for (let sectionIndex = 0; sectionIndex < sectionEntries.length; sectionIndex += 1) {
+        const entry = sectionEntries[sectionIndex];
+        const raw = toUint8Array(entry.content);
+        const decompressed = (flags & 1) ? pako.inflateRaw(raw) : raw;
+        const sectionRecordCounts = {};
+        const section = {
+          section_index: sectionIndex,
+          stream_path: entry.path,
+          compressed_size_bytes: raw.length,
+          decompressed_size_bytes: decompressed.length,
+          paragraphs: [],
+          record_counts: sectionRecordCounts
+        };
+
+        if (includeBinaryHashes.checked) {
+          section.sha256_decompressed = await sha256Hex(decompressed);
+        }
+
+        let pos = 0;
+        let seqno = 0;
+        let current = null;
+        while (pos < decompressed.length) {
+          const result = readRecord(decompressed, pos);
+          const rec = result.record;
+          pos = result.nextPos;
+          const tagName = tagNames[rec.tag_id] || "UNKNOWN_TAG_" + rec.tag_id;
+          sectionRecordCounts[tagName] = (sectionRecordCounts[tagName] || 0) + 1;
+          recordCounts[tagName] = (recordCounts[tagName] || 0) + 1;
+
+          if (rec.tag_id === 66) {
+            if (current) {
+              section.paragraphs.push(current);
+              allParagraphs.push(current);
+              renderedParagraphs.push(current.rendered_text || "");
+            }
+
+            current = {
+              global_paragraph_index: allParagraphs.length,
+              section_index: sectionIndex,
+              section_paragraph_index: section.paragraphs.length,
+              para_header_record_seqno: seqno,
+              para_header_level: rec.level,
+              para_header_size: rec.size,
+              para_header: parseParaHeader(rec.payload),
+              para_text_record_seqno: null,
+              para_text_level: null,
+              para_text_size: null,
+              chunks: [],
+              text: "",
+              rendered_text: ""
+            };
+          } else if (rec.tag_id === 67) {
+            paraTextRecordCount += 1;
+            const parsed = parseParaText(rec.payload);
+            textChunkCount += parsed.chunks.filter((chunk) => chunk.type === "text").length;
+            controlChunkCount += parsed.chunks.filter((chunk) => chunk.type === "control").length;
+            textCharacterCount += parsed.text.length;
+
+            if (!current) {
+              current = {
+                global_paragraph_index: allParagraphs.length,
+                section_index: sectionIndex,
+                section_paragraph_index: section.paragraphs.length,
+                para_header_record_seqno: null,
+                para_header_level: null,
+                para_header_size: null,
+                para_header: null
+              };
+            }
+
+            current.para_text_record_seqno = seqno;
+            current.para_text_level = rec.level;
+            current.para_text_size = rec.size;
+            current.chunks = parsed.chunks;
+            current.text = parsed.text;
+            current.rendered_text = parsed.rendered_text;
+            if (includePayloadHex.checked) {
+              current.para_text_payload_hex = bytesToHex(rec.payload);
+            }
+          }
+          seqno += 1;
+        }
+
+        if (current) {
+          section.paragraphs.push(current);
+          allParagraphs.push(current);
+          renderedParagraphs.push(current.rendered_text || "");
+        }
+
+        sections.push(section);
+      }
+
+      const plainText = renderedParagraphs.join("\n");
+      const nonemptyLines = plainText
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      return {
+        schema: "hwp5_exact_text_archive_v1",
+        source: {
+          filename: file.name,
+          size_bytes: file.size,
+          sha256: sourceHash,
+          hwp_signature: signature.replace(/\u0000+$/g, ""),
+          hwp_version_tuple: version,
+          flags: {
+            raw: flags,
+            compressed: Boolean(flags & 1),
+            password: Boolean(flags & 2),
+            distributable: Boolean(flags & 4)
+          }
+        },
+        extraction: {
+          created_at: new Date().toISOString(),
+          method: "Browser-side HWP 5.x OLE BodyText record parser with CFB and pako.",
+          note: "HWP BodyText 문단 레코드의 텍스트 조각과 제어문자를 순서대로 보관합니다."
+        },
+        metadata_guess: guessMetadata(nonemptyLines),
+        counts: {
+          section_count: sections.length,
+          paragraph_count: allParagraphs.length,
+          para_text_record_count: paraTextRecordCount,
+          text_chunk_count: textChunkCount,
+          control_chunk_count: controlChunkCount,
+          text_character_count: textCharacterCount,
+          plain_text_character_count: plainText.length,
+          nonempty_plain_text_line_count: nonemptyLines.length,
+          record_counts: recordCounts
+        },
+        preview_text: null,
+        plain_text: plainText,
+        plain_text_nonempty_lines: nonemptyLines,
+        bodytext_sections: sections
+      };
+    }
+
+    function findStreamBytes(cfb, path) {
+      const normalized = normalizePath(path);
+      const file = cfb.FileIndex.find((entry, index) => {
+        const entryName = normalizePath(entry.name);
+        const fullPath = normalizePath(cfb.FullPaths && cfb.FullPaths[index]);
+        return entryName === normalized ||
+          entryName.endsWith("/" + normalized) ||
+          fullPath === normalized ||
+          fullPath.endsWith("/" + normalized);
+      });
+      return file && file.content ? toUint8Array(file.content) : null;
+    }
+
+    function listSectionEntries(cfb) {
+      return cfb.FileIndex
+        .map((entry, index) => ({
+          entry,
+          path: normalizePath((cfb.FullPaths && cfb.FullPaths[index]) || entry.name)
+        }))
+        .filter((item) => item.entry.content && /(^|\/)BodyText\/Section\d+$/i.test(item.path))
+        .map((item) => ({
+          path: item.path.replace(/^Root Entry\//, ""),
+          content: item.entry.content
+        }))
+        .sort((a, b) => {
+          const ai = Number((a.path.match(/Section(\d+)$/i) || [0, 0])[1]);
+          const bi = Number((b.path.match(/Section(\d+)$/i) || [0, 0])[1]);
+          return ai - bi;
+        });
+    }
+
+    function normalizePath(path) {
+      return String(path || "").replace(/\\/g, "/").replace(/^\/+/, "");
+    }
+
+    function readRecord(data, pos) {
+      const start = pos;
+      const headerValue = readUint32(data, pos);
+      pos += 4;
+      const tagId = headerValue & 0x3ff;
+      const level = (headerValue >>> 10) & 0x3ff;
+      let size = (headerValue >>> 20) & 0xfff;
+      let headerSize = 4;
+      if (size === 0xfff) {
+        size = readUint32(data, pos);
+        pos += 4;
+        headerSize = 8;
+      }
+      const payload = data.slice(pos, pos + size);
+      pos += size;
+      return {
+        record: {
+          start_offset: start,
+          end_offset: pos,
+          header_size: headerSize,
+          tag_id: tagId,
+          tag_name: tagNames[tagId] || "UNKNOWN_TAG_" + tagId,
+          level,
+          size,
+          payload,
+          header_value_hex: headerValue.toString(16).padStart(8, "0")
+        },
+        nextPos: pos
+      };
+    }
+
+    function parseParaHeader(payload) {
+      if (payload.length < 22) return { raw_hex: bytesToHex(payload) };
+      const textField = readUint32(payload, 0);
+      return {
+        text_field_raw: textField,
+        char_count: textField & 0x7fffffff,
+        unknown_high_bit: Boolean(textField & 0x80000000),
+        controlmask: readUint32(payload, 4),
+        parashape_id: readUint16(payload, 8),
+        style_id: payload[10],
+        split: payload[11],
+        charshapes_count: readUint16(payload, 12),
+        rangetags_count: readUint16(payload, 14),
+        linesegs_count: readUint16(payload, 16),
+        instance_id: readUint32(payload, 18),
+        raw_hex: bytesToHex(payload)
+      };
+    }
+
+    function parseParaText(payload) {
+      const chunks = [];
+      const textParts = [];
+      const renderedParts = [];
+      let idx = 0;
+
+      while (idx < payload.length) {
+        const ctrlPos = findControlPos(payload, idx);
+        if (idx < ctrlPos) {
+          const text = decodeUtf16(payload.slice(idx, ctrlPos));
+          chunks.push({
+            type: "text",
+            start_char: idx / 2,
+            end_char: ctrlPos / 2,
+            value: text
+          });
+          textParts.push(text);
+          renderedParts.push(text);
+        }
+
+        if (ctrlPos < payload.length) {
+          const code = readUint16(payload, ctrlPos);
+          const unitSize = controlUnitSizes[code] || 1;
+          const end = Math.min(payload.length, ctrlPos + unitSize * 2);
+          const control = {
+            type: "control",
+            start_char: ctrlPos / 2,
+            end_char: end / 2,
+            code,
+            name: controlNames[code] || "CTLCHR" + code.toString(16).padStart(2, "0").toUpperCase()
+          };
+          if (unitSize === 8 && end - ctrlPos >= 16) {
+            if (code === 0x09) {
+              control.param = {
+                width: readUint32(payload, ctrlPos + 2),
+                unknown0: payload[ctrlPos + 6],
+                unknown1: payload[ctrlPos + 7],
+                unknown2_hex: bytesToHex(payload.slice(ctrlPos + 8, ctrlPos + 16))
+              };
+            } else {
+              control.chid = decodeLatin1(payload.slice(ctrlPos + 2, ctrlPos + 6));
+              control.param_hex = bytesToHex(payload.slice(ctrlPos + 6, ctrlPos + 16));
+            }
+          }
+          chunks.push(control);
+          renderedParts.push(controlToText(code));
+          idx = end;
+        } else {
+          idx = payload.length;
+        }
+      }
+
+      let rendered = renderedParts.join("");
+      if (rendered.endsWith("\n")) rendered = rendered.slice(0, -1);
+      return {
+        chunks,
+        text: textParts.join(""),
+        rendered_text: rendered
+      };
+    }
+
+    function findControlPos(data, start) {
+      for (let i = start; i + 1 < data.length; i += 2) {
+        const code = data[i] | (data[i + 1] << 8);
+        if (code >= 0 && code <= 0x1f && Object.prototype.hasOwnProperty.call(controlUnitSizes, code)) {
+          return i;
+        }
+      }
+      return data.length;
+    }
+
+    function controlToText(code) {
+      if (code === 0x0a || code === 0x0d) return "\n";
+      if (code === 0x09) return "\t";
+      if (code === 0x18) return "-";
+      if (code === 0x1e || code === 0x1f) return " ";
+      return "";
+    }
+
+    function guessMetadata(lines) {
+      const guess = { title: lines[0] || "" };
+      const labels = ["학교", "학년", "학기", "과목", "지도교사"];
+      const first = lines.slice(0, 40);
+      for (const label of labels) {
+        const index = first.findIndex((line) => line.replace(/\s/g, "") === label);
+        if (index < 0) continue;
+        const offsetValue = first[index + labels.length];
+        const nextValue = first[index + 1];
+        const value = offsetValue && !labels.includes(offsetValue) ? offsetValue : nextValue;
+        if (label === "학교") guess.school = value || "";
+        if (label === "학년") guess.grade = value || "";
+        if (label === "학기") guess.semester = value || "";
+        if (label === "과목") guess.subject = value || "";
+        if (label === "지도교사") guess.teacher = value || "";
+      }
+      return guess;
+    }
+
+    function readUint16(data, offset) {
+      return data[offset] | (data[offset + 1] << 8);
+    }
+
+    function readUint32(data, offset) {
+      return (data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24)) >>> 0;
+    }
+
+    function toUint8Array(value) {
+      if (value instanceof Uint8Array) return value;
+      if (value instanceof ArrayBuffer) return new Uint8Array(value);
+      return new Uint8Array(value);
+    }
+
+    function decodeUtf16(bytes) {
+      return new TextDecoder("utf-16le", { fatal: false }).decode(bytes);
+    }
+
+    function decodeLatin1(bytes) {
+      let out = "";
+      for (const byte of bytes) out += String.fromCharCode(byte);
+      return out;
+    }
+
+    function bytesToHex(bytes) {
+      let out = "";
+      for (let i = 0; i < bytes.length; i += 1) {
+        out += bytes[i].toString(16).padStart(2, "0");
+      }
+      return out;
+    }
+
+    async function sha256Hex(bytes) {
+      if (!window.crypto || !window.crypto.subtle) return "unavailable";
+      const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+      return Array.from(new Uint8Array(digest))
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+    }
+
+    function updateMetrics(archive, jsonText) {
+      lineCount.textContent = archive.counts.nonempty_plain_text_line_count.toLocaleString("ko-KR");
+      paragraphCount.textContent = archive.counts.paragraph_count.toLocaleString("ko-KR");
+      textRecordCount.textContent = archive.counts.para_text_record_count.toLocaleString("ko-KR");
+      charCount.textContent = archive.counts.plain_text_character_count.toLocaleString("ko-KR");
+      jsonSize.textContent = formatBytes(new Blob([jsonText]).size);
+    }
+
+    function updateEmptyMetrics() {
+      lineCount.textContent = "0";
+      paragraphCount.textContent = "0";
+      textRecordCount.textContent = "0";
+      charCount.textContent = "0";
+      jsonSize.textContent = "0 KB";
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return bytes + " B";
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+      return (bytes / 1024 / 1024).toFixed(1) + " MB";
+    }
+
+    function setStatus(message, warn = false) {
+      statusBox.textContent = message;
+      statusBox.classList.toggle("warn", warn);
+    }
+  </script>
+</body>
+</html>

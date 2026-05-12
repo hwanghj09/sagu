@@ -1,0 +1,694 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JSON DOC 문서 생성기</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --panel: #fff;
+      --line: #d6deea;
+      --text: #182231;
+      --muted: #687386;
+      --accent: #1f7469;
+      --accent-dark: #15564e;
+      --warn: #946112;
+      --soft: #eef7f5;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    main {
+      width: min(1220px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 24px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .sub,
+    .file-name,
+    .status,
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .sub {
+      margin: 0;
+    }
+
+    .file-name {
+      word-break: break-all;
+      text-align: right;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(292px, 380px) minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 10px 24px rgba(24, 34, 49, 0.06);
+    }
+
+    .controls {
+      padding: 18px;
+    }
+
+    .dropzone {
+      display: grid;
+      place-items: center;
+      min-height: 184px;
+      padding: 22px;
+      border: 1px dashed #99a7ba;
+      border-radius: 8px;
+      background: #fbfcff;
+      text-align: center;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+
+    .dropzone.dragging {
+      background: var(--soft);
+      border-color: var(--accent);
+    }
+
+    .dropzone strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 16px;
+    }
+
+    .dropzone span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    input[type="file"] {
+      width: 100%;
+      margin-top: 14px;
+    }
+
+    .checks {
+      display: grid;
+      gap: 10px;
+      margin: 18px 0;
+      font-size: 14px;
+    }
+
+    .check {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 8px;
+      align-items: start;
+    }
+
+    .check small {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    button {
+      min-height: 40px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      padding: 0 14px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 750;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: var(--accent-dark);
+    }
+
+    button.secondary {
+      background: #fff;
+      border-color: var(--line);
+      color: var(--text);
+    }
+
+    button.secondary:hover {
+      background: #f2f5f9;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .status {
+      min-height: 58px;
+      margin-top: 14px;
+      padding: 12px;
+      border-radius: 7px;
+      background: #f4f7fb;
+      white-space: pre-wrap;
+    }
+
+    .status.warn {
+      color: var(--warn);
+      background: #fff7e9;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 10px;
+      border-radius: 7px;
+      background: #f7f9fc;
+    }
+
+    .metric b {
+      display: block;
+      font-size: 20px;
+      line-height: 1.1;
+    }
+
+    .preview-wrap {
+      padding: 14px;
+    }
+
+    .preview-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    iframe {
+      width: 100%;
+      min-height: 620px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    @media (max-width: 880px) {
+      header,
+      .layout {
+        display: block;
+      }
+
+      .file-name {
+        text-align: left;
+        margin-top: 8px;
+      }
+
+      .controls {
+        margin-bottom: 14px;
+      }
+
+      .summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      iframe {
+        min-height: 460px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>JSON DOC 문서 생성기</h1>
+        <p class="sub">HWP에서 추출한 JSON을 올리면 Word에서 열 수 있는 .doc 문서를 만듭니다.</p>
+      </div>
+      <div class="file-name" id="fileName">파일 대기 중</div>
+    </header>
+
+    <div class="layout">
+      <section class="panel controls">
+        <div class="dropzone" id="dropzone">
+          <div>
+            <strong>JSON 파일 놓기</strong>
+            <span>hwp_to_json_converter.html 또는 기존 추출 JSON을 올리세요.</span>
+          </div>
+        </div>
+
+        <input id="fileInput" type="file" accept=".json,application/json">
+
+        <div class="checks">
+          <label class="check">
+            <input id="includeLineNumbers" type="checkbox">
+            <div>
+              줄 번호 포함
+              <small>원문 대조가 필요할 때 각 본문 줄 앞에 번호를 붙입니다.</small>
+            </div>
+          </label>
+
+          <label class="check">
+            <input id="includeArchiveInfo" type="checkbox" checked>
+            <div>
+              보관 정보 포함
+              <small>원본 파일명, SHA-256, 추출 시각을 문서 끝에 표시합니다.</small>
+            </div>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="downloadBtn" disabled>DOC 저장</button>
+          <button class="secondary" id="htmlBtn" disabled>HTML 저장</button>
+        </div>
+
+        <div class="status" id="status">JSON 파일을 올리면 문서 미리보기가 표시됩니다.</div>
+      </section>
+
+      <section class="panel">
+        <div class="summary">
+          <div class="metric"><b id="lineCount">0</b><span>본문 줄</span></div>
+          <div class="metric"><b id="sectionCount">0</b><span>큰 제목</span></div>
+          <div class="metric"><b id="bulletCount">0</b><span>목록 줄</span></div>
+          <div class="metric"><b id="docSize">0 KB</b><span>DOC 크기</span></div>
+        </div>
+        <div class="preview-wrap">
+          <div class="preview-head">
+            <h2>문서 미리보기</h2>
+            <span class="file-name" id="outputName">-</span>
+          </div>
+          <iframe id="preview" title="DOC preview"></iframe>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const fileInput = document.getElementById("fileInput");
+    const dropzone = document.getElementById("dropzone");
+    const includeLineNumbers = document.getElementById("includeLineNumbers");
+    const includeArchiveInfo = document.getElementById("includeArchiveInfo");
+    const downloadBtn = document.getElementById("downloadBtn");
+    const htmlBtn = document.getElementById("htmlBtn");
+    const preview = document.getElementById("preview");
+    const statusBox = document.getElementById("status");
+    const fileName = document.getElementById("fileName");
+    const outputName = document.getElementById("outputName");
+    const lineCount = document.getElementById("lineCount");
+    const sectionCount = document.getElementById("sectionCount");
+    const bulletCount = document.getElementById("bulletCount");
+    const docSize = document.getElementById("docSize");
+
+    let currentJson = null;
+    let currentFile = null;
+    let currentDocHtml = "";
+    let currentBaseName = "document";
+
+    fileInput.addEventListener("change", () => {
+      if (fileInput.files && fileInput.files[0]) handleFile(fileInput.files[0]);
+    });
+
+    dropzone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      dropzone.classList.add("dragging");
+    });
+
+    dropzone.addEventListener("dragleave", () => {
+      dropzone.classList.remove("dragging");
+    });
+
+    dropzone.addEventListener("drop", (event) => {
+      event.preventDefault();
+      dropzone.classList.remove("dragging");
+      if (event.dataTransfer.files && event.dataTransfer.files[0]) handleFile(event.dataTransfer.files[0]);
+    });
+
+    includeLineNumbers.addEventListener("change", rebuildIfReady);
+    includeArchiveInfo.addEventListener("change", rebuildIfReady);
+
+    downloadBtn.addEventListener("click", () => {
+      if (!currentDocHtml) return;
+      downloadText(currentBaseName + ".doc", currentDocHtml, "application/msword;charset=utf-8");
+    });
+
+    htmlBtn.addEventListener("click", () => {
+      if (!currentDocHtml) return;
+      downloadText(currentBaseName + ".html", currentDocHtml, "text/html;charset=utf-8");
+    });
+
+    async function handleFile(file) {
+      currentFile = file;
+      fileName.textContent = file.name;
+      currentBaseName = file.name.replace(/\.json$/i, "").replace(/[\\/:*?"<>|]+/g, "_") + "_재생성";
+      setStatus("JSON을 읽는 중입니다.");
+
+      try {
+        currentJson = JSON.parse(await file.text());
+        rebuildDocument();
+      } catch (error) {
+        console.error(error);
+        currentJson = null;
+        currentDocHtml = "";
+        updatePreview("");
+        downloadBtn.disabled = true;
+        htmlBtn.disabled = true;
+        updateMetrics({ lines: 0, sections: 0, bullets: 0 }, "");
+        setStatus("변환 실패: " + error.message, true);
+      }
+    }
+
+    function rebuildIfReady() {
+      if (currentJson) rebuildDocument();
+    }
+
+    function rebuildDocument() {
+      const normalized = normalizeArchive(currentJson);
+      currentDocHtml = buildWordHtml(normalized, currentJson);
+      updatePreview(currentDocHtml);
+      downloadBtn.disabled = false;
+      htmlBtn.disabled = false;
+      updateMetrics(normalized.stats, currentDocHtml);
+      outputName.textContent = currentBaseName + ".doc";
+      setStatus("문서 생성 완료\nWord에서 열 수 있는 .doc 파일로 저장할 수 있습니다.");
+    }
+
+    function normalizeArchive(json) {
+      const metadata = json.metadata_guess || {};
+      const rawLines = Array.isArray(json.plain_text_nonempty_lines)
+        ? json.plain_text_nonempty_lines
+        : String(json.plain_text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+      const title = metadata.title || rawLines[0] || "교수학습평가계획";
+      const metadataRows = [
+        ["학교", metadata.school || ""],
+        ["학년", metadata.grade || ""],
+        ["학기", metadata.semester || ""],
+        ["과목", metadata.subject || ""],
+        ["지도교사", metadata.teacher || ""]
+      ].filter((row) => row[1]);
+
+      const startIndex = findBodyStart(rawLines);
+      const bodyLines = rawLines.slice(startIndex);
+      const blocks = [];
+      let sections = 0;
+      let bullets = 0;
+
+      bodyLines.forEach((line, index) => {
+        const kind = classifyLine(line, index);
+        if (kind === "section" || kind === "major") sections += 1;
+        if (kind === "bullet" || kind === "check" || kind === "ordered") bullets += 1;
+        blocks.push({ line, kind, originalIndex: startIndex + index });
+      });
+
+      return {
+        title,
+        metadataRows,
+        lines: rawLines,
+        blocks,
+        stats: {
+          lines: rawLines.length,
+          sections,
+          bullets
+        }
+      };
+    }
+
+    function findBodyStart(lines) {
+      const firstSection = lines.findIndex((line) => line === "Ⅰ" || line.startsWith("Ⅰ."));
+      if (firstSection >= 0) return firstSection;
+      return Math.min(lines.length, 11);
+    }
+
+    function classifyLine(line, index) {
+      const compact = line.replace(/\s/g, "");
+      if (/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]$/.test(compact)) return "major";
+      if (/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ][.．]/.test(compact)) return "section";
+      if (/^(\d+)$/.test(compact) && Number(compact) <= 20) return "number";
+      if (/^[가-하]\./.test(line)) return "section";
+      if (/^\(?\d+\)/.test(line)) return "ordered";
+      if (/^[□■★]/.test(line)) return "check";
+      if (/^[∙◦ㆍ·]/.test(line)) return "bullet";
+      if (/^\d+월$/.test(compact) || /^\d+월$/.test(compact)) return "month";
+      if (index < 3) return "section";
+      return "paragraph";
+    }
+
+    function buildWordHtml(doc, source) {
+      const body = [];
+      body.push(`<h1>${escapeHtml(doc.title)}</h1>`);
+
+      if (doc.metadataRows.length) {
+        body.push('<table class="meta"><tbody>');
+        body.push('<tr>' + doc.metadataRows.map((row) => `<th>${escapeHtml(row[0])}</th>`).join("") + '</tr>');
+        body.push('<tr>' + doc.metadataRows.map((row) => `<td>${escapeHtml(row[1])}</td>`).join("") + '</tr>');
+        body.push('</tbody></table>');
+      }
+
+      body.push('<div class="document-body">');
+      let pendingMajor = "";
+      doc.blocks.forEach((block) => {
+        const line = escapeHtml(block.line);
+        const number = includeLineNumbers.checked ? `<span class="line-no">${block.originalIndex + 1}</span>` : "";
+
+        if (block.kind === "major") {
+          pendingMajor = block.line;
+          return;
+        }
+
+        if (pendingMajor) {
+          body.push(`<h2>${number}${escapeHtml(pendingMajor)} ${line}</h2>`);
+          pendingMajor = "";
+          return;
+        }
+
+        if (block.kind === "section") {
+          body.push(`<h2>${number}${line}</h2>`);
+        } else if (block.kind === "month") {
+          body.push(`<h3>${number}${line}</h3>`);
+        } else if (block.kind === "number") {
+          body.push(`<p class="number-line">${number}${line}</p>`);
+        } else if (block.kind === "bullet" || block.kind === "check" || block.kind === "ordered") {
+          body.push(`<p class="bullet">${number}${line}</p>`);
+        } else {
+          body.push(`<p>${number}${line}</p>`);
+        }
+      });
+      if (pendingMajor) body.push(`<h2>${escapeHtml(pendingMajor)}</h2>`);
+      body.push('</div>');
+
+      if (includeArchiveInfo.checked) {
+        body.push(buildArchiveInfo(source));
+      }
+
+      return `<!doctype html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:w="urn:schemas-microsoft-com:office:word"
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(doc.title)}</title>
+  <!--[if gte mso 9]>
+  <xml>
+    <w:WordDocument>
+      <w:View>Print</w:View>
+      <w:Zoom>100</w:Zoom>
+      <w:DoNotOptimizeForBrowser/>
+    </w:WordDocument>
+  </xml>
+  <![endif]-->
+  <style>
+    @page {
+      size: A4;
+      margin: 20mm 18mm 18mm 18mm;
+    }
+    body {
+      font-family: "Malgun Gothic", "맑은 고딕", "Batang", "바탕", serif;
+      font-size: 10.5pt;
+      line-height: 1.55;
+      color: #111;
+    }
+    h1 {
+      margin: 0 0 18pt;
+      text-align: center;
+      font-size: 18pt;
+      font-weight: 700;
+    }
+    h2 {
+      margin: 16pt 0 7pt;
+      font-size: 13pt;
+      font-weight: 700;
+      page-break-after: avoid;
+    }
+    h3 {
+      margin: 12pt 0 6pt;
+      font-size: 11.5pt;
+      font-weight: 700;
+      page-break-after: avoid;
+    }
+    p {
+      margin: 0 0 4pt;
+      word-break: keep-all;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8pt 0 14pt;
+    }
+    th,
+    td {
+      border: 1pt solid #555;
+      padding: 5pt 6pt;
+      text-align: center;
+      vertical-align: middle;
+    }
+    th {
+      background: #edf1f7;
+      font-weight: 700;
+    }
+    .document-body {
+      margin-top: 8pt;
+    }
+    .bullet {
+      padding-left: 12pt;
+      text-indent: -8pt;
+    }
+    .number-line {
+      margin-top: 8pt;
+      font-weight: 700;
+    }
+    .line-no {
+      display: inline-block;
+      min-width: 28pt;
+      margin-right: 5pt;
+      color: #777;
+      font-size: 8.5pt;
+      font-weight: 400;
+    }
+    .archive-info {
+      margin-top: 20pt;
+      padding-top: 8pt;
+      border-top: 1pt solid #aaa;
+      color: #555;
+      font-size: 8.5pt;
+    }
+    .archive-info p {
+      margin: 0 0 2pt;
+    }
+  </style>
+</head>
+<body>
+${body.join("\n")}
+</body>
+</html>`;
+    }
+
+    function buildArchiveInfo(source) {
+      const sourceInfo = source.source || {};
+      const extraction = source.extraction || {};
+      const rows = [
+        ["원본 파일명", sourceInfo.filename],
+        ["원본 SHA-256", sourceInfo.sha256 || sourceInfo.sha256_text],
+        ["JSON 스키마", source.schema],
+        ["추출 시각", extraction.created_at]
+      ].filter((row) => row[1]);
+
+      if (!rows.length) return "";
+      return `<div class="archive-info">
+  ${rows.map((row) => `<p><b>${escapeHtml(row[0])}:</b> ${escapeHtml(String(row[1]))}</p>`).join("\n  ")}
+</div>`;
+    }
+
+    function updatePreview(html) {
+      const doc = preview.contentDocument || preview.contentWindow.document;
+      doc.open();
+      doc.write(html || "<!doctype html><html><body></body></html>");
+      doc.close();
+    }
+
+    function downloadText(filename, text, type) {
+      const blob = new Blob(["\ufeff", text], { type });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function updateMetrics(stats, html) {
+      lineCount.textContent = stats.lines.toLocaleString("ko-KR");
+      sectionCount.textContent = stats.sections.toLocaleString("ko-KR");
+      bulletCount.textContent = stats.bullets.toLocaleString("ko-KR");
+      docSize.textContent = formatBytes(new Blob(["\ufeff", html]).size);
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return bytes + " B";
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+      return (bytes / 1024 / 1024).toFixed(1) + " MB";
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function setStatus(message, warn = false) {
+      statusBox.textContent = message;
+      statusBox.classList.toggle("warn", warn);
+    }
+  </script>
+</body>
+</html>
