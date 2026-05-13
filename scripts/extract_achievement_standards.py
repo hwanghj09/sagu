@@ -23,6 +23,9 @@ import fitz
 
 CODE_RE = re.compile(r"\[([^\]\n]{2,50})\]")
 BROKEN_PREFIX_CODE_RE = re.compile(r"(?<![가-힣])(?P<prefix>[가-힣]{1,4})\[(?P<body>\d[\d\s-]{4,24})\]")
+STANDARD_CODE_PARTS_RE = re.compile(
+    r"^(?P<grade>\d{1,2})(?P<subject>[가-힣]{1,6})(?P<area>\d{2})-(?P<sequence>\d{2})$"
+)
 AREA_RE = re.compile(r"^\((\d+)\)\s+(.{1,80})$")
 COURSE_RE = re.compile(r"^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]+\s*\.?\s*(.+?)(?:\s+성취수준)?$")
 GENERIC_COURSE_TITLES = {
@@ -31,6 +34,7 @@ GENERIC_COURSE_TITLES = {
     "성취수준 활용",
     "성취수준 개발의 이해",
 }
+LEVEL_LABELS = ("A", "B", "C", "D", "E")
 
 
 def now_iso() -> str:
@@ -58,6 +62,49 @@ def normalize_code(code: str) -> str:
 def looks_like_standard_code(code: str) -> bool:
     normalized = normalize_code(code)
     return bool(re.search(r"\d", normalized) and re.search(r"\d{2}-\d{2}", normalized))
+
+
+def split_standard_code(code: str) -> dict[str, str] | None:
+    match = STANDARD_CODE_PARTS_RE.fullmatch(normalize_code(code))
+    if not match:
+        return None
+    return match.groupdict()
+
+
+def align_code_with_context(
+    code: str,
+    *,
+    last_standard: dict[str, Any] | None,
+    current_area_number: str,
+) -> str:
+    if not last_standard or not current_area_number:
+        return code
+
+    current_parts = split_standard_code(code)
+    previous_parts = split_standard_code(last_standard.get("code", ""))
+    if not current_parts or not previous_parts:
+        return code
+
+    if current_parts["area"] != current_area_number.zfill(2):
+        return code
+    if previous_parts["area"] != current_parts["area"]:
+        return code
+    if previous_parts["grade"] != current_parts["grade"]:
+        return code
+    if previous_parts["subject"] == current_parts["subject"]:
+        return code
+
+    previous_sequence = int(previous_parts["sequence"])
+    current_sequence = int(current_parts["sequence"])
+    if current_sequence != previous_sequence + 1:
+        return code
+
+    return (
+        f"{current_parts['grade']}"
+        f"{previous_parts['subject']}"
+        f"{current_parts['area']}"
+        f"-{current_parts['sequence']}"
+    )
 
 
 def block_lines(block: dict[str, Any]) -> list[str]:
@@ -159,6 +206,13 @@ def clean_course_title(title: str) -> str:
     return title
 
 
+def looks_like_course_heading_text(text: str) -> bool:
+    match = COURSE_RE.fullmatch(normalize_space(text))
+    if not match:
+        return False
+    return bool(clean_course_title(match.group(1)))
+
+
 def infer_course_from_path(path: Path) -> str:
     haystack = " ".join([path.stem, *[part for part in path.parts[-3:-1]]])
     for pattern in (
@@ -250,6 +304,252 @@ def is_left_column_text_block(block: dict[str, Any], page_width: float) -> bool:
     return True
 
 
+def right_column_min_x(page_width: float) -> float:
+    return page_width * 0.30
+
+
+def block_first_line(block: dict[str, Any]) -> str:
+    lines = block_lines(block)
+    for line in lines:
+        text = normalize_space(line)
+        if text:
+            return text
+    return ""
+
+
+def text_first_line(text: str) -> str:
+    for line in text.splitlines():
+        normalized = normalize_space(line)
+        if normalized:
+            return normalized
+    return ""
+
+
+def text_contains_level_label(text: str) -> bool:
+    return any(normalize_space(line) in LEVEL_LABELS for line in text.splitlines())
+
+
+def level_label_for_block(block: dict[str, Any], page_width: float) -> str:
+    x0, _y0, _x1, _y1 = block.get("bbox", (0, 0, page_width, 0))
+    if x0 < right_column_min_x(page_width):
+        return ""
+
+    first_line = block_first_line(block)
+    if first_line in LEVEL_LABELS:
+        return first_line
+    return ""
+
+
+def strip_level_prefix(text: str, label: str) -> str:
+    text = text.lstrip()
+    text = re.sub(rf"^{re.escape(label)}(?:\s+|\n+)?", "", text, count=1)
+    return text.strip()
+
+
+def collect_band_text(
+    blocks: list[dict[str, Any]],
+    *,
+    label: str,
+    start_y: float,
+    end_y: float,
+    min_x: float,
+) -> str:
+    parts: list[tuple[float, float, str]] = []
+    for block in blocks:
+        x0, y0, _x1, y1 = block.get("bbox", (0, 0, 0, 0))
+        center_y = (y0 + y1) / 2
+        if x0 < min_x or center_y <= start_y or center_y >= end_y:
+            continue
+
+        raw_text = block_text(block)
+        normalized = normalize_space(raw_text)
+        if not normalized:
+            continue
+        if re.fullmatch(r"\d+", normalized):
+            continue
+        if looks_like_course_heading_text(normalized):
+            continue
+
+        first_line = block_first_line(block)
+        if first_line == label and normalized == label:
+            continue
+        if first_line in LEVEL_LABELS and first_line != label:
+            continue
+
+        cleaned = strip_level_prefix(raw_text, label) if first_line == label else raw_text.strip()
+        if cleaned:
+            parts.append((y0, x0, cleaned))
+
+    if not parts:
+        return ""
+
+    parts.sort(key=lambda item: (item[0], item[1]))
+    return normalize_space(" ".join(text for _y, _x, text in parts))
+
+
+def extract_page_level_clusters(blocks: list[dict[str, Any]], page_width: float, page_height: float) -> list[dict[str, Any]]:
+    label_blocks: list[tuple[str, dict[str, Any]]] = []
+    for block in blocks:
+        label = level_label_for_block(block, page_width)
+        if label:
+            label_blocks.append((label, block))
+
+    clusters: list[list[tuple[str, dict[str, Any]]]] = []
+    current: list[tuple[str, dict[str, Any]]] = []
+    expected_index = 0
+
+    for label, block in label_blocks:
+        expected_label = LEVEL_LABELS[expected_index]
+        if label == "A":
+            if current and len(current) == len(LEVEL_LABELS):
+                clusters.append(current)
+            current = [(label, block)]
+            expected_index = 1
+            continue
+
+        if not current:
+            continue
+        if label != expected_label:
+            current = []
+            expected_index = 0
+            continue
+
+        current.append((label, block))
+        expected_index += 1
+        if expected_index == len(LEVEL_LABELS):
+            expected_index = len(LEVEL_LABELS) - 1
+
+    if current and len(current) == len(LEVEL_LABELS):
+        clusters.append(current)
+
+    extracted: list[dict[str, Any]] = []
+    for index, cluster in enumerate(clusters):
+        label_map = {label: block for label, block in cluster}
+        next_cluster = clusters[index + 1] if index + 1 < len(clusters) else None
+        next_cluster_start_y = next_cluster[0][1]["bbox"][1] if next_cluster else page_height
+
+        levels: dict[str, str] = {}
+        for label_index, label in enumerate(LEVEL_LABELS):
+            block = label_map[label]
+            current_y0 = block["bbox"][1]
+            prev_y1 = cluster[label_index - 1][1]["bbox"][3] if label_index else max(0.0, current_y0 - 30.0)
+            next_y0 = cluster[label_index + 1][1]["bbox"][1] if label_index + 1 < len(LEVEL_LABELS) else next_cluster_start_y
+            text = collect_band_text(
+                blocks,
+                label=label,
+                start_y=prev_y1,
+                end_y=next_y0,
+                min_x=right_column_min_x(page_width),
+            )
+            levels[label] = text
+
+        extracted.append(
+            {
+                "bbox": [
+                    round(min(label_map[label]["bbox"][0] for label in LEVEL_LABELS), 2),
+                    round(min(label_map[label]["bbox"][1] for label in LEVEL_LABELS), 2),
+                    round(max(label_map[label]["bbox"][2] for label in LEVEL_LABELS), 2),
+                    round(max(label_map[label]["bbox"][3] for label in LEVEL_LABELS), 2),
+                ],
+                "achievement_levels": levels,
+            }
+        )
+
+    return extracted
+
+
+def collect_active_right_blocks(
+    page_index: int,
+    blocks: list[dict[str, Any]],
+    page_width: float,
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    min_x = right_column_min_x(page_width)
+    for block in blocks:
+        x0, y0, x1, y1 = block.get("bbox", (0, 0, 0, 0))
+        if x0 < min_x:
+            continue
+
+        raw_text = block_text(block)
+        normalized = normalize_space(raw_text)
+        if not normalized or re.fullmatch(r"\d+", normalized):
+            continue
+        if looks_like_course_heading_text(normalized):
+            continue
+
+        entries.append(
+            {
+                "page_index": page_index,
+                "bbox": (x0, y0, x1, y1),
+                "raw_text": raw_text,
+                "first_line": text_first_line(raw_text),
+            }
+        )
+    return entries
+
+
+def parse_levels_from_entries(entries: list[dict[str, Any]]) -> dict[str, str]:
+    lines: list[str] = []
+    for entry in entries:
+        for line in entry["raw_text"].splitlines():
+            normalized = normalize_space(line)
+            if not normalized or re.fullmatch(r"\d+", normalized):
+                continue
+            lines.append(normalized)
+
+    buckets: dict[str, list[str]] = {label: [] for label in LEVEL_LABELS}
+    prefix: list[str] = []
+    current_label: str | None = None
+
+    for line in lines:
+        exact_match = re.fullmatch(r"([A-E])(?:\s+(.*))?", line)
+        if exact_match:
+            current_label = exact_match.group(1)
+            remainder = normalize_space(exact_match.group(2) or "")
+            if remainder:
+                buckets[current_label].append(remainder)
+            continue
+
+        if current_label is None:
+            prefix.append(line)
+        else:
+            buckets[current_label].append(line)
+
+    if prefix:
+        buckets["A"] = prefix + buckets["A"]
+
+    return {label: normalize_space(" ".join(buckets[label])) for label in LEVEL_LABELS}
+
+
+def extract_document_level_clusters(active_right_blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    a_start_indices = [
+        index
+        for index, entry in enumerate(active_right_blocks)
+        if entry["first_line"] == "A"
+    ]
+
+    clusters: list[dict[str, Any]] = []
+    for position, start_index in enumerate(a_start_indices):
+        end_index = a_start_indices[position + 1] if position + 1 < len(a_start_indices) else len(active_right_blocks)
+        region_entries = active_right_blocks[start_index:end_index]
+
+        if start_index > 0:
+            previous = active_right_blocks[start_index - 1]
+            current = active_right_blocks[start_index]
+            if (
+                previous["page_index"] == current["page_index"]
+                and not text_contains_level_label(previous["raw_text"])
+                and current["bbox"][1] - previous["bbox"][3] <= 32
+            ):
+                region_entries = [previous] + region_entries
+
+        levels = parse_levels_from_entries(region_entries)
+        if any(levels.values()):
+            clusters.append({"achievement_levels": levels})
+
+    return clusters
+
+
 def strip_non_standard_suffix(text: str) -> str:
     text = re.split(r"\s*<\s*탐구\s*활동\s*>", text, maxsplit=1)[0]
     text = re.split(r"\s*성취기준\s*해설", text, maxsplit=1)[0]
@@ -309,12 +609,15 @@ def extract_from_pdf(path: Path, *, loose: bool = False) -> dict[str, Any]:
     active = loose
     pending_start_pages = 0
     parser_mode = "loose_left_column" if loose else "strict_standard_section"
+    active_right_blocks: list[dict[str, Any]] = []
 
     with fitz.open(path) as document:
         metadata = dict(document.metadata or {})
         page_count = document.page_count
         for page_index, page in enumerate(document):
             blocks = page_text_blocks(page)
+            page_level_clusters = extract_page_level_clusters(blocks, page.rect.width, page.rect.height)
+            page_level_index = 0
             block_texts = [normalized_block_text(block) for block in blocks]
             has_start = any(exact_heading(text, "start") for text in block_texts)
             has_stop = any(exact_heading(text, "stop") for text in block_texts)
@@ -347,6 +650,8 @@ def extract_from_pdf(path: Path, *, loose: bool = False) -> dict[str, Any]:
             if not active:
                 continue
 
+            active_right_blocks.extend(collect_active_right_blocks(page_index, blocks, page.rect.width))
+
             for block in blocks:
                 if last_standard is not None and is_left_column_text_block(block, page.rect.width):
                     raw_text = block_text(block, preserve_wrap_spaces=True)
@@ -359,7 +664,13 @@ def extract_from_pdf(path: Path, *, loose: bool = False) -> dict[str, Any]:
                 raw_text = block_text(block, preserve_wrap_spaces=True)
                 prefix = code_prefix_for_course(current_course)
                 for item in split_standards_from_block(raw_text, default_code_prefix=prefix):
-                    code = item["code"]
+                    code = align_code_with_context(
+                        item["code"],
+                        last_standard=last_standard,
+                        current_area_number=current_area_number,
+                    )
+                    item["code"] = code
+                    item["text"] = f"[{code}] {item['statement']}"
                     if code in seen_codes:
                         continue
                     seen_codes.add(code)
@@ -370,12 +681,22 @@ def extract_from_pdf(path: Path, *, loose: bool = False) -> dict[str, Any]:
                         "area": current_area,
                         "page_number": page_index + 1,
                         "bbox": [round(value, 2) for value in block.get("bbox", ())],
+                        "achievement_levels": {label: "" for label in LEVEL_LABELS},
                     }
+                    if page_level_index < len(page_level_clusters):
+                        standard["achievement_levels"] = page_level_clusters[page_level_index]["achievement_levels"]
+                        standard["achievement_levels_bbox"] = page_level_clusters[page_level_index]["bbox"]
+                    page_level_index += 1
                     standards.append(standard)
                     last_standard = standard
 
+    document_level_clusters = extract_document_level_clusters(active_right_blocks)
+    if len(document_level_clusters) == len(standards):
+        for standard, cluster in zip(standards, document_level_clusters):
+            standard["achievement_levels"] = cluster["achievement_levels"]
+
     return {
-        "schema": "achievement_standards_v1",
+        "schema": "achievement_standards_v2",
         "source": {
             "path": str(path),
             "filename": path.name,
@@ -385,7 +706,7 @@ def extract_from_pdf(path: Path, *, loose: bool = False) -> dict[str, Any]:
         },
         "extraction": {
             "created_at": now_iso(),
-            "parser": "pymupdf_left_column_extractor",
+            "parser": "pymupdf_left_column_with_levels_extractor",
             "mode": parser_mode,
             "page_count": page_count,
             "standard_count": len(standards),
